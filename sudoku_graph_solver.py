@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
 import time
 import copy
+import random
 
-####################################################################################
-# Interface
+
+# ---------------------------------------------------------------------------- #
+#                                   Interface                                  #
+# ---------------------------------------------------------------------------- #
 
 class IGraph(ABC):
     """Define o contrato para a topologia do grafo Sudoku."""
@@ -29,9 +32,15 @@ class ISolver(ABC):
     def solve(self, grid: list[list[int]], graph: IGraph) -> bool:
         pass
 
+class ISolutionCounter(ABC):
+    @abstractmethod
+    def count_solutions(self) -> int:
+        pass
 
-####################################################################################
-# Dependencias
+
+# ---------------------------------------------------------------------------- #
+#                                 Dependencias                                 #
+# ---------------------------------------------------------------------------- #
 
 class SudokuGraph(IGraph):
     def __init__(self, n=3):
@@ -92,7 +101,6 @@ class SudokuGraph(IGraph):
     def get_vizinhos(self, v):
         return self.grafo_adj[v]
     
-
 
 class NaiveBacktrackingSolver(ISolver):
     """
@@ -296,48 +304,170 @@ class SmartBacktrackingSolver(ISolver):
             
         return False
 
-def adicionar_sudoku_nsxns(n: int)-> list[list]:
 
-    print("Coloque os números do sudoku e aperte enter 0 p/ vazio e -1 se quiser voltar")
-    i = 0
-    sudoku_list = [["x"] * n**2 for _ in range(n**2)]
-    imprimir_grid(sudoku_list, n)
-    while i < n**2:
-        j = 0
-        while j < n**2:
-            try:
-                num_to_add = int(input())
-            except:
-                print(f"[Error] Adicione um número de 1 a {n**2} (0 se for vazio) e -1 se quiser voltar")
-                continue
+class BacktrackingCounter(ISolutionCounter):
+    def count_solutions(self, grid, graph) -> int:
+        self.grid = grid
+        self.graph = graph
+        self.tamanho = len(grid)
+        self.contador_solucoes = 0
 
-            if num_to_add > n**2 or num_to_add < -1:
-                print(f"[Error] Adicione um número de 1 a {n**2} (0 se for vazio) e -1 se quiser voltar")
-                continue
+        self._contar_recursivo()
 
-            if num_to_add == -1:
-                print("Voltando um número")
-                if j == 0:
-                    j = n**2 -1
-                    i-=1
-                    sudoku_list[i][j] = "x"
-                    imprimir_grid(sudoku_list, n)
-                    continue
-                j-=1
-                sudoku_list[i][j] = "x"
-                imprimir_grid(sudoku_list, n)
-                continue
+        return self.contador_solucoes
+    
+    def _contar_recursivo(self):
+            # 1. Encontra o próximo vértice a colorir
+            celula_vazia = self._encontrar_proximo_vazio()
 
-            sudoku_list[i][j] = num_to_add
+            # 2. Caso Base (Sucesso):
+            # Se não há células vazias, uma solução completa foi encontrada.
+            if celula_vazia is None:
+                self.contador_solucoes += 1 # Incrementa o contador
+                return False # Retorna False para FORÇAR a continuação da busca
+
+            # 3. Preparar Recursão:
+            linha, col = celula_vazia
+            v = self.graph.grid_para_vertice(linha, col)
+
+            # 4. Caso Recursivo (Tentar cores de 1 a 9)
+            for cor in range(1, self.tamanho + 1):
+                
+                # 4a. Verificar restrições (Checar vizinhos)
+                if self._is_coloracao_valida(v, cor):
+                    
+                    # 4b. Tentar (Colorir o vértice)
+                    self.grid[linha][col] = cor
+                    
+                    # 4c. Chamar recursão
+                    #    Note que NÃO retornamos True aqui.
+                    #    Nós apenas chamamos a função para continuar a busca.
+                    self._contar_recursivo()
+                    
+                    # 4d. Desfazer (Backtrack)
+                    # O backtrack acontece IMEDIATAMENTE após a chamada recursiva,
+                    # para que o loop 'for' possa tentar a próxima cor.
+                    self.grid[linha][col] = 0
             
-            imprimir_grid(sudoku_list, n)
-            j+=1
-        i+=1
+            # 5. Caso Base (Falha):
+            # Se todas as cores (1-9) falharam para esta célula.
+            return False
 
-    return sudoku_list
+    def _encontrar_proximo_vazio(self) -> tuple[int, int] | None:
+        """
+        Encontra a próxima célula vazia (valor 0) no grid.
+        Na Teoria dos Grafos: "Encontra o próximo vértice não colorido".
+        """
+        for l in range(self.tamanho):
+            for c in range(self.tamanho):
+                if self.grid[l][c] == 0:
+                    return (l, c)
+        return None # Nenhuma célula vazia, o grid está completo.
 
-###################################################################################################
-# Funções Auxiliares
+    def _is_coloracao_valida(self, v: int, cor: int) -> bool:
+        """
+        Verifica se uma 'cor' (dígito) pode ser colocada no vértice 'v'
+        sem conflitar com seus vizinhos já coloridos.
+        """
+        # Itera por todos os vizinhos (mesma linha, coluna ou bloco)
+        for vizinho in self.graph.get_vizinhos(v):
+            # Converte o vértice vizinho em coordenadas
+            (l_viz, c_viz) = self.graph.vertice_para_grid(vizinho)
+            
+            # Verifica se o vizinho já tem a cor que estamos tentando usar
+            if self.grid[l_viz][c_viz] == cor:
+                return False
+        
+        # Nenhuma colisão encontrada
+        return True
+        
+
+class PuzzleGenerator:
+    """
+    Responsável por gerar novos puzzles de Sudoku.
+    Usa a Injeção de Dependência para desacoplar-se dos algoritmos
+    específicos de resolução e contagem.
+    """
+
+    def __init__(self, solver: ISolver, counter: ISolutionCounter):
+        """
+        Inicializa o gerador com as 'ferramentas' necessárias.
+
+        Args:
+            solver: Um objeto que implementa ISolver (para criar a solução inicial).
+            counter: Um objeto que implementa ISolutionCounter (para verificar a unicidade).
+        """
+        self.solver = solver
+        self.counter = counter
+
+    def gerar_puzzle(self, n: int) -> tuple[list[list[int]], list[list[int]]]:
+        """
+        Gera um novo puzzle de Sudoku com garantia de solução única.
+
+        Args:
+            n: O tamanho do bloco (ex: 3 para 9x9).
+
+        Returns:
+            Uma tupla contendo (puzzle, solucao)
+        """
+        
+        # --- Passo 1: Criar a base (Grid e Grafo) ---
+        graph = SudokuGraph(n=n)
+        grid_vazio = [[0] * graph.tamanho for _ in range(graph.tamanho)]
+        
+        # --- Passo 2: Gerar uma solução completa ---
+        # (Idealmente, você adicionaria aleatoriedade aqui, 
+        # mas para este projeto, resolver um grid vazio funciona)
+        print("Gerando solução base...")
+        self.solver.solve(grid_vazio, graph)
+        # Agora, 'grid_vazio' não está mais vazio, contém a solução.
+        solucao_completa = copy.deepcopy(grid_vazio)
+        
+        # Este é o grid que vamos "cavar" para criar o puzzle
+        puzzle_grid = copy.deepcopy(solucao_completa)
+        
+        # --- Passo 3: Preparar a Remoção (Poda) ---
+        # Cria uma lista de todos os vértices (0 a 80) e a embaralha
+        vertices = list(range(graph.num_vertices))
+        random.shuffle(vertices)
+        
+        print(f"Iniciando a 'cavação' de {len(vertices)} células...")
+        
+        # --- Passo 4: Loop de Remoção e Verificação ---
+        for v in vertices:
+            (linha, col) = graph.vertice_para_grid(v)
+            
+            # Guarda o valor caso precisemos desfazer
+            valor_removido = puzzle_grid[linha][col]
+            
+            # Pula se a célula já foi removida (ex: em um puzzle simétrico)
+            if valor_removido == 0:
+                continue
+
+            # 4a. Tenta remover a pista
+            puzzle_grid[linha][col] = 0
+            
+            # 4b. Verifica a Unicidade
+            # É CRUCIAL usar uma cópia, pois o contador modifica o grid!
+            grid_para_teste = copy.deepcopy(puzzle_grid)
+            
+            num_solucoes = self.counter.count_solutions(grid_para_teste, graph)
+            
+            # 4c. Decide
+            if num_solucoes > 1:
+                # Se tiver mais de uma solução, a remoção foi inválida.
+                # Desfaz a remoção (coloca o número de volta).
+                puzzle_grid[linha][col] = valor_removido
+            # else:
+                # Se num_solucoes == 1, a remoção foi válida! 
+                # Deixa a célula como 0 e continua o loop.
+        
+        print("Geração concluída.")
+        return (puzzle_grid, solucao_completa)
+
+# ---------------------------------------------------------------------------- #
+#                              Funções Auxiliares                              #
+# ---------------------------------------------------------------------------- #
 
 def imprimir_grid(grid: list[list[int]], n: int):
     """Imprime o grid de Sudoku formatado."""
@@ -380,108 +510,188 @@ def validar_grid_inicial(grid: list[list[int]], graph: IGraph) -> bool:
                         return False
     return True
 
+def adicionar_sudoku_nsxns(n: int)-> list[list]:
+
+    print("Coloque os números do sudoku e aperte enter 0 p/ vazio e -1 se quiser voltar")
+    i = 0
+    sudoku_list = [["x"] * n**2 for _ in range(n**2)]
+    imprimir_grid(sudoku_list, n)
+    while i < n**2:
+        j = 0
+        while j < n**2:
+            try:
+                num_to_add = int(input())
+            except:
+                print(f"[Error] Adicione um número de 1 a {n**2} (0 se for vazio) e -1 se quiser voltar")
+                continue
+
+            if num_to_add > n**2 or num_to_add < -1:
+                print(f"[Error] Adicione um número de 1 a {n**2} (0 se for vazio) e -1 se quiser voltar")
+                continue
+
+            if num_to_add == -1:
+                print("Voltando um número")
+                if j == 0:
+                    j = n**2 -1
+                    i-=1
+                    sudoku_list[i][j] = "x"
+                    imprimir_grid(sudoku_list, n)
+                    continue
+                j-=1
+                sudoku_list[i][j] = "x"
+                imprimir_grid(sudoku_list, n)
+                continue
+
+            sudoku_list[i][j] = num_to_add
+            
+            imprimir_grid(sudoku_list, n)
+            j+=1
+        i+=1
+
+    return sudoku_list
 
 
+# ---------------------------------------------------------------------------- #
+#                                  Driver Code                                 #
+# ---------------------------------------------------------------------------- #
+
+# # --- 1. Definição do Problema ---
+# N_VALOR = 3
+
+# # Renomeie para guardar o original
+# meu_puzzle_original = [
+#     [8, 0, 0, 0, 0, 0, 0, 0, 0],
+#     [0, 0, 3, 6, 0, 0, 0, 0, 0],
+#     [0, 7, 0, 0, 9, 0, 2, 0, 0],
+#     [0, 5, 0, 0, 0, 7, 0, 0, 0],
+#     [0, 0, 0, 0, 4, 5, 7, 0, 0],
+#     [0, 0, 0, 1, 0, 0, 0, 3, 0],
+#     [0, 0, 1, 0, 0, 0, 0, 6, 8],
+#     [0, 0, 8, 5, 0, 0, 0, 1, 0],
+#     [0, 9, 0, 0, 0, 0, 4, 0, 0]
+# ]
+
+
+# # --- 2. Instanciação dos Componentes ---
+# print(f"Iniciando setup para Sudoku {N_VALOR**2}x{N_VALOR**2}...")
+# graph: IGraph = SudokuGraph(n=N_VALOR)
+# print("Modelo do Grafo (G=(V,E)) construído com sucesso.")
+
+# # --- 3. Validação Inicial ---
+# print("\n--- Puzzle Inicial ---")
+# imprimir_grid(meu_puzzle_original, N_VALOR)
+
+# print("\nValidando pistas iniciais...")
+# if not validar_grid_inicial(meu_puzzle_original, graph):
+#     print("ERRO: O puzzle inicial é inválido e não pode ser resolvido.")
+#     exit()  # Para o programa
+# else:
+#     print("Puzzle inicial é válido.")
+
+
+# # --- 4. Execução e Teste com o Naive ---
+
+# # Crie uma CÓPIA para o solver Naive
+# puzzle_para_naive = copy.deepcopy(meu_puzzle_original)
+
+# try:
+#     solver_naive: ISolver = NaiveBacktrackingSolver()
+#     print("\nAlgoritmo de Resolução (NaiveBacktrackingSolver) instanciado.")
+    
+#     print("Resolvendo com o Naive...")
+#     start_time_naive = time.time()
+#     sucesso_naive = solver_naive.solve(puzzle_para_naive, graph) # Resolve a cópia
+#     end_time_naive = time.time()
+#     tempo_total_naive = end_time_naive - start_time_naive
+
+# except Exception as e:
+#     print(f"Erro ao instanciar ou rodar NaiveBacktrackingSolver: {e}")
+#     sucesso_naive = False
+
+
+# # --- 5. Execução e Teste com o Smart ---
+
+# # Crie uma SEGUNDA CÓPIA para o solver Smart
+# puzzle_para_smart = copy.deepcopy(meu_puzzle_original)
+
+# try:
+#     solver_smart: ISolver = SmartBacktrackingSolver()
+#     print("\nAlgoritmo de Resolução (SmartBacktrackingSolver) instanciado.")
+    
+#     print("Resolvendo com o Smart...")
+#     start_time_smart = time.time()
+#     sucesso_smart = solver_smart.solve(puzzle_para_smart, graph) # Resolve a outra cópia
+#     end_time_smart = time.time()
+#     tempo_total_smart = end_time_smart - start_time_smart
+
+# except Exception as e:
+#     print(f"Erro ao instanciar ou rodar SmartBacktrackingSolver: {e}")
+#     sucesso_smart = False
+
+
+# # --- 6. Resultados ---
+
+# if sucesso_naive:
+#     print(f"\n--- Solução Naive --- (em {tempo_total_naive:.4f} segundos)")
+#     imprimir_grid(puzzle_para_naive, N_VALOR)
+# else:
+#     print(f"\n--- Naive não encontrou solução --- (verificado em {tempo_total_naive:.4f} segundos)")
+
+# if sucesso_smart:
+#     print(f"\n--- Solução Smart --- (em {tempo_total_smart:.8f} segundos)")
+#     imprimir_grid(puzzle_para_smart, N_VALOR)
+# else:
+#     print(f"\n--- Smart não encontrou solução --- (verificado em {tempo_total_smart:.8f} segundos)")
+
+# # Comparação de tempo
+# if sucesso_naive and sucesso_smart:
+#     if tempo_total_smart < tempo_total_naive:
+#         # Evita divisão por zero se o tempo for muito rápido
+#         if tempo_total_smart > 0:
+#             fator = tempo_total_naive / tempo_total_smart
+#             print(f"\n O Smart foi {fator:.1f}x mais rápido!")
+#         else:
+#             print(f"\n O Smart foi instantâneo (Naive levou {tempo_total_naive:.4f}s)")
+#     else:
+#         if tempo_total_naive > 0:
+#             fator = tempo_total_smart / tempo_total_naive
+#             print(f"\n O Naive foi {fator:.1f}x mais rápido (Smart foi mais lento).")
+#         else:
+#              print(f"\n O Naive foi instantâneo (Smart levou {tempo_total_smart:.8f}s).")
+
+
+    
 # --- 1. Definição do Problema ---
-N_VALOR = 3
-
-# Renomeie para guardar o original
-meu_puzzle_original = [
-    [8, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 3, 6, 0, 0, 0, 0, 0],
-    [0, 7, 0, 0, 9, 0, 2, 0, 0],
-    [0, 5, 0, 0, 0, 7, 0, 0, 0],
-    [0, 0, 0, 0, 4, 5, 7, 0, 0],
-    [0, 0, 0, 1, 0, 0, 0, 3, 0],
-    [0, 0, 1, 0, 0, 0, 0, 6, 8],
-    [0, 0, 8, 5, 0, 0, 0, 1, 0],
-    [0, 9, 0, 0, 0, 0, 4, 0, 0]
-]
-
+N_VALOR = 4
 
 # --- 2. Instanciação dos Componentes ---
-print(f"Iniciando setup para Sudoku {N_VALOR**2}x{N_VALOR**2}...")
+print(f"Iniciando setup para Geração de Sudoku {N_VALOR**2}x{N_VALOR**2}...")
+
 graph: IGraph = SudokuGraph(n=N_VALOR)
-print("Modelo do Grafo (G=(V,E)) construído com sucesso.")
+solver: ISolver = NaiveBacktrackingSolver()
+counter: ISolutionCounter = BacktrackingCounter()
 
-# --- 3. Validação Inicial ---
-print("\n--- Puzzle Inicial ---")
-imprimir_grid(meu_puzzle_original, N_VALOR)
+# Instancia o Gerador e injeta as ferramentas
+generator = PuzzleGenerator(solver, counter)
 
-print("\nValidando pistas iniciais...")
-if not validar_grid_inicial(meu_puzzle_original, graph):
-    print("ERRO: O puzzle inicial é inválido e não pode ser resolvido.")
-    exit()  # Para o programa
-else:
-    print("Puzzle inicial é válido.")
+print("Componentes instanciados.")
 
+# --- 3. Execução da Geração ---
+start_time = time.time()
 
-# --- 4. Execução e Teste com o Naive ---
+(novo_puzzle, solucao) = generator.gerar_puzzle(N_VALOR)
 
-# Crie uma CÓPIA para o solver Naive
-puzzle_para_naive = copy.deepcopy(meu_puzzle_original)
+end_time = time.time()
+tempo_total = end_time - start_time
 
-try:
-    solver_naive: ISolver = NaiveBacktrackingSolver()
-    print("\nAlgoritmo de Resolução (NaiveBacktrackingSolver) instanciado.")
-    
-    print("Resolvendo com o Naive...")
-    start_time_naive = time.time()
-    sucesso_naive = solver_naive.solve(puzzle_para_naive, graph) # Resolve a cópia
-    end_time_naive = time.time()
-    tempo_total_naive = end_time_naive - start_time_naive
+# --- 4. Resultados ---
+print(f"\n--- Puzzle Gerado com Sucesso! --- (em {tempo_total:.2f} segundos)\n")
+imprimir_grid(novo_puzzle, N_VALOR)
 
-except Exception as e:
-    print(f"Erro ao instanciar ou rodar NaiveBacktrackingSolver: {e}")
-    sucesso_naive = False
+print("\n--- Solução Única Correspondente --- \n")
+imprimir_grid(solucao, N_VALOR)
 
-
-# --- 5. Execução e Teste com o Smart ---
-
-# Crie uma SEGUNDA CÓPIA para o solver Smart
-puzzle_para_smart = copy.deepcopy(meu_puzzle_original)
-
-try:
-    solver_smart: ISolver = SmartBacktrackingSolver()
-    print("\nAlgoritmo de Resolução (SmartBacktrackingSolver) instanciado.")
-    
-    print("Resolvendo com o Smart...")
-    start_time_smart = time.time()
-    sucesso_smart = solver_smart.solve(puzzle_para_smart, graph) # Resolve a outra cópia
-    end_time_smart = time.time()
-    tempo_total_smart = end_time_smart - start_time_smart
-
-except Exception as e:
-    print(f"Erro ao instanciar ou rodar SmartBacktrackingSolver: {e}")
-    sucesso_smart = False
-
-
-# --- 6. Resultados ---
-
-if sucesso_naive:
-    print(f"\n--- Solução Naive --- (em {tempo_total_naive:.4f} segundos)")
-    imprimir_grid(puzzle_para_naive, N_VALOR)
-else:
-    print(f"\n--- Naive não encontrou solução --- (verificado em {tempo_total_naive:.4f} segundos)")
-
-if sucesso_smart:
-    print(f"\n--- Solução Smart --- (em {tempo_total_smart:.8f} segundos)")
-    imprimir_grid(puzzle_para_smart, N_VALOR)
-else:
-    print(f"\n--- Smart não encontrou solução --- (verificado em {tempo_total_smart:.8f} segundos)")
-
-# Comparação de tempo
-if sucesso_naive and sucesso_smart:
-    if tempo_total_smart < tempo_total_naive:
-        # Evita divisão por zero se o tempo for muito rápido
-        if tempo_total_smart > 0:
-            fator = tempo_total_naive / tempo_total_smart
-            print(f"\n O Smart foi {fator:.1f}x mais rápido!")
-        else:
-            print(f"\n O Smart foi instantâneo (Naive levou {tempo_total_naive:.4f}s)")
-    else:
-        if tempo_total_naive > 0:
-            fator = tempo_total_smart / tempo_total_naive
-            print(f"\n O Naive foi {fator:.1f}x mais rápido (Smart foi mais lento).")
-        else:
-             print(f"\n O Naive foi instantâneo (Smart levou {tempo_total_smart:.8f}s).")
+# --- 5. (Opcional) Validar o puzzle gerado ---
+print("\nValidando o puzzle gerado...")
+num_solucoes = counter.count_solutions(novo_puzzle, graph)
+print(f"O puzzle gerado tem {num_solucoes} solução(ões). (Deve ser 1)")
