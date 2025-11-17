@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+import time
+import copy
 
 ####################################################################################
 # Interface
@@ -335,9 +337,7 @@ def adicionar_sudoku_nsxns(n: int)-> list[list]:
     return sudoku_list
 
 ###################################################################################################
-# Driver Code
-
-import time
+# Funções Auxiliares
 
 def imprimir_grid(grid: list[list[int]], n: int):
     """Imprime o grid de Sudoku formatado."""
@@ -356,16 +356,37 @@ def imprimir_grid(grid: list[list[int]], n: int):
             print(f"{val} " if val != 0 else ". ", end="")
         print() # Nova linha no final da linha do grid
 
+def validar_grid_inicial(grid: list[list[int]], graph: IGraph) -> bool:
+    """
+    Verifica se as pistas iniciais (não-zero) do grid são válidas
+    de acordo com as regras do grafo.
+    """
+    tamanho = len(grid)
+    for l in range(tamanho):
+        for c in range(tamanho):
+            valor = grid[l][c]
+            
+            # Se for uma pista (um número já preenchido)
+            if valor != 0:
+                v = graph.grid_para_vertice(l, c)
+                
+                # Verificamos seus vizinhos
+                for vizinho in graph.get_vizinhos(v):
+                    l_viz, c_viz = graph.vertice_para_grid(vizinho)
+                    
+                    # Se um vizinho tiver o MESMO valor da pista, o puzzle é inválido
+                    if grid[l_viz][c_viz] == valor:
+                        print(f"  [Erro de Validação] Conflito encontrado na célula ({l}, {c})")
+                        return False
+    return True
+
+
 
 # --- 1. Definição do Problema ---
-
-
-# print("Coloque o tamanho do sudoku (um sudoku de tamanho n é um n²xn²):")
-# N_VALOR = int(input())
-# meu_puzzle = adicionar_sudoku_nsxns(N_VALOR) # TODO
-
 N_VALOR = 3
-meu_puzzle = [
+
+# Renomeie para guardar o original
+meu_puzzle_original = [
     [8, 0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 3, 6, 0, 0, 0, 0, 0],
     [0, 7, 0, 0, 9, 0, 2, 0, 0],
@@ -379,83 +400,88 @@ meu_puzzle = [
 
 
 # --- 2. Instanciação dos Componentes ---
-
 print(f"Iniciando setup para Sudoku {N_VALOR**2}x{N_VALOR**2}...")
+graph: IGraph = SudokuGraph(n=N_VALOR)
+print("Modelo do Grafo (G=(V,E)) construído com sucesso.")
 
-# Instancia o grafo (que implementa IGraph)
-# Isso chamará __init__ e _construir_grafo()
-try:
-    graph: IGraph = SudokuGraph(n=N_VALOR)
-    print("Modelo do Grafo (G=(V,E)) construído com sucesso.")
-except Exception as e:
-    print(f"Erro ao instanciar SudokuGraph: {e}")
-    exit()
-
-# Instancia o solver (que implementa ISolver)
-try:
-    solver: ISolver = NaiveBacktrackingSolver()
-    print("Algoritmo de Resolução (NaiveBacktrackingSolver) instanciado.")
-except Exception as e:
-    print(f"Erro ao instanciar NaiveBacktrackingSolver: {e}")
-    exit()
-
-# --- 3. Execução e Teste com o Naive ---
-
+# --- 3. Validação Inicial ---
 print("\n--- Puzzle Inicial ---")
-imprimir_grid(meu_puzzle, N_VALOR)
+imprimir_grid(meu_puzzle_original, N_VALOR)
 
-print("\nResolvendo (aplicando coloração de vértices)...")
-start_time = time.time()
-
-# Chama o algoritmo de resolução
-sucesso = solver.solve(meu_puzzle, graph)
-
-end_time = time.time()
-tempo_total_naive = end_time - start_time
-
-print("Finalizado usando o NaiveBacktrackingSolver")
+print("\nValidando pistas iniciais...")
+if not validar_grid_inicial(meu_puzzle_original, graph):
+    print("ERRO: O puzzle inicial é inválido e não pode ser resolvido.")
+    exit()  # Para o programa
+else:
+    print("Puzzle inicial é válido.")
 
 
-# --- #
+# --- 4. Execução e Teste com o Naive ---
 
-# Execução com o smart
+# Crie uma CÓPIA para o solver Naive
+puzzle_para_naive = copy.deepcopy(meu_puzzle_original)
 
 try:
-    solver: ISolver = SmartBacktrackingSolver()
-    print("Algoritmo de Resolução (SmartBacktrackingSolver) instanciado.")
+    solver_naive: ISolver = NaiveBacktrackingSolver()
+    print("\nAlgoritmo de Resolução (NaiveBacktrackingSolver) instanciado.")
+    
+    print("Resolvendo com o Naive...")
+    start_time_naive = time.time()
+    sucesso_naive = solver_naive.solve(puzzle_para_naive, graph) # Resolve a cópia
+    end_time_naive = time.time()
+    tempo_total_naive = end_time_naive - start_time_naive
+
 except Exception as e:
-    print(f"Erro ao instanciar SmartBacktrackingSolver: {e}")
-    exit()
+    print(f"Erro ao instanciar ou rodar NaiveBacktrackingSolver: {e}")
+    sucesso_naive = False
 
-print("\n--- Puzzle Inicial ---")
-imprimir_grid(meu_puzzle, N_VALOR)
 
-print("\nResolvendo (aplicando coloração de vértices)...")
-start_time_smart = time.time()
+# --- 5. Execução e Teste com o Smart ---
 
-# Chama o algoritmo de resolução
-sucesso = solver.solve(meu_puzzle, graph)
+# Crie uma SEGUNDA CÓPIA para o solver Smart
+puzzle_para_smart = copy.deepcopy(meu_puzzle_original)
 
-end_time_smart = time.time()
-tempo_total_smart = end_time_smart - start_time_smart
+try:
+    solver_smart: ISolver = SmartBacktrackingSolver()
+    print("\nAlgoritmo de Resolução (SmartBacktrackingSolver) instanciado.")
+    
+    print("Resolvendo com o Smart...")
+    start_time_smart = time.time()
+    sucesso_smart = solver_smart.solve(puzzle_para_smart, graph) # Resolve a outra cópia
+    end_time_smart = time.time()
+    tempo_total_smart = end_time_smart - start_time_smart
 
-print("Finalizado usando o SmartBacktrackingSolver")
-# --- 4. Resultados ---
+except Exception as e:
+    print(f"Erro ao instanciar ou rodar SmartBacktrackingSolver: {e}")
+    sucesso_smart = False
 
-if sucesso:
-    print(f"\n--- Solução Encontrada Usando NaiveBacktrackingSolver! --- (em {tempo_total_naive:.4f} segundos)")
-    imprimir_grid(meu_puzzle, N_VALOR)
+
+# --- 6. Resultados ---
+
+if sucesso_naive:
+    print(f"\n--- Solução Naive --- (em {tempo_total_naive:.4f} segundos)")
+    imprimir_grid(puzzle_para_naive, N_VALOR)
 else:
-    print(f"\n--- Nenhuma Solução Encontrada --- (verificado em {tempo_total_naive:.4f} segundos)")
+    print(f"\n--- Naive não encontrou solução --- (verificado em {tempo_total_naive:.4f} segundos)")
 
-if sucesso:
-    print(f"\n--- Solução Encontrada! SmartBacktrackingSolver --- (em {tempo_total_smart:.8f} segundos)")
-    imprimir_grid(meu_puzzle, N_VALOR)
+if sucesso_smart:
+    print(f"\n--- Solução Smart --- (em {tempo_total_smart:.8f} segundos)")
+    imprimir_grid(puzzle_para_smart, N_VALOR)
 else:
-    print(f"\n--- Nenhuma Solução Encontrada --- (verificado em {tempo_total_smart:.8f} segundos)")
+    print(f"\n--- Smart não encontrou solução --- (verificado em {tempo_total_smart:.8f} segundos)")
 
-if tempo_total_smart < tempo_total_naive:
-    fator = tempo_total_naive / tempo_total_smart
-    print(f"🚀 O Smart foi {fator:.1f}x mais rápido!")
-else:
-    print("O Naive foi mais rápido (provavelmente o Sudoku era muito fácil).")
+# Comparação de tempo
+if sucesso_naive and sucesso_smart:
+    if tempo_total_smart < tempo_total_naive:
+        # Evita divisão por zero se o tempo for muito rápido
+        if tempo_total_smart > 0:
+            fator = tempo_total_naive / tempo_total_smart
+            print(f"\n O Smart foi {fator:.1f}x mais rápido!")
+        else:
+            print(f"\n O Smart foi instantâneo (Naive levou {tempo_total_naive:.4f}s)")
+    else:
+        if tempo_total_naive > 0:
+            fator = tempo_total_smart / tempo_total_naive
+            print(f"\n O Naive foi {fator:.1f}x mais rápido (Smart foi mais lento).")
+        else:
+             print(f"\n O Naive foi instantâneo (Smart levou {tempo_total_smart:.8f}s).")
