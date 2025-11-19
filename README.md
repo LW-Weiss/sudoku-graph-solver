@@ -29,5 +29,5 @@ O objetivo deste trabalho é demonstrar como a **Teoria dos Grafos** (especifica
 
 1. Clone o repositório:
    ```bash
-   git clone [https://github.com/SEU-USUARIO/NOME-DO-REPO.git](https://github.com/SEU-USUARIO/NOME-DO-REPO.git)
-   cd NOME-DO-REPO
+   git clone [https://github.com/LW-Weiss/sudoku-graph-solver.git](https://github.com/LW-Weiss/sudoku-graph-solver.git)
+   cd sudoku-graph-solver
