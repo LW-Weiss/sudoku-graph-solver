@@ -31,3 +31,16 @@ O objetivo deste trabalho é demonstrar como a **Teoria dos Grafos** (especifica
    ```bash
    git clone https://github.com/LW-Weiss/sudoku-graph-solver.git
    cd sudoku-graph-solver
+   
+2. Execute o programa principal:
+   ```bash
+   python main.py
+   
+3. Siga o menu interativo no terminal:
+
+#
+Para mais detalhes, leia o artigo completo:
+Adicionar link do pdf.
+
+
+
